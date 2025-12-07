@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>MindLex 1.0</title>
+    
+    <!-- 1. Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        future: {
+          hoverOnlyWhenSupported: true, 
+        },
+        theme: {
+          extend: {
+            colors: {
+              primary: '#4F46E5',
+              secondary: '#10B981',
+              danger: '#EF4444',
+              warning: '#F59E0B',
+            },
+            animation: {
+              'fade-in': 'fadeIn 0.3s ease-out',
+            },
+            keyframes: {
+              fadeIn: {
+                '0%': { opacity: '0', transform: 'scale(0.95)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    
+    <!-- 2. Core Libraries (Staticfile CDN - Stable in China) -->
+    <script crossorigin="anonymous" src="https://cdn.staticfile.org/react/18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin="anonymous" src="https://cdn.staticfile.org/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script crossorigin="anonymous" src="https://cdn.staticfile.org/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Babel for parsing JSX in browser -->
+    <script crossorigin="anonymous" src="https://cdn.staticfile.org/babel-standalone/7.23.5/babel.min.js"></script>
+
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      body { -webkit-tap-highlight-color: transparent; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 h-screen overflow-hidden selection:bg-primary selection:text-white">
+    <div id="root" class="h-full"></div>
+
+    <!-- 3. Application Logic -->
+    <script type="text/babel" data-presets="react">
+        // Safety check
+        if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+            document.getElementById('root').innerHTML = '<div class="p-4 text-red-500">Error: Core libraries failed to load. Please check your connection.</div>';
+            throw new Error("React not loaded");
+        }
+
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- Constants ---
+        const WordStatus = {
+            Unmastered: 'unmastered',
+            Mastered: 'mastered',
+            TooSimple: 'too_simple',
+        };
+
+        const ViewName = {
+            HOME: 'HOME',
+            MODULE_DETAIL: 'MODULE_DETAIL',
+            WORD_LIST: 'WORD_LIST',
+            WORD_DETAIL: 'WORD_DETAIL',
+            RECITE: 'RECITE',
+            SCREENING: 'SCREENING',
+        };
+
+        const SPECIAL_MODULE_IDS = {
+            FAVORITES: 'favorites-module-id',
+            TRASH: 'trash-module-id',
+        };
+
+        // --- Icons ---
+        const IconBase = ({ d, className, fill = "none", stroke = "currentColor", strokeWidth = "2" }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill={fill} stroke={stroke} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
+                {d}
+            </svg>
+        );
+
+        const BrainIcon = ({ className }) => <IconBase className={className} d={<><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></>} />;
+        const TrashIcon = ({ className }) => <IconBase className={className} d={<><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></>} />;
+        const SpeakerIcon = ({ className }) => <IconBase className={className} d={<><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></>} />;
+        const StarIcon = ({ className, filled }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" 
+                fill={filled ? "#FACC15" : "none"} 
+                stroke={filled ? "#FACC15" : "currentColor"} 
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" 
+                className={`${className} ${filled ? '' : 'text-gray-400'}`}>
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+        );
+        const SearchIcon = ({ className }) => <IconBase className={className} d={<><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>} />;
+        const EditIcon = ({ className }) => <IconBase className={className} d={<><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></>} />;
+        const BackIcon = ({ className }) => <IconBase className={className} d={<><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></>} />;
+        const ImportIcon = ({ className }) => <IconBase className={className} d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>} />;
+        const ExportIcon = ({ className }) => <IconBase className={className} d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></>} />;
+        const SelectAllIcon = ({ className }) => <IconBase className={className} d={<><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></>} />;
+        const MoveIcon = ({ className }) => <IconBase className={className} d={<><polyline points="15 3 21 3 21 9"/><path d="M9 21 21 3"/></>} />;
+        const ResetIcon = ({ className }) => <IconBase className={className} d={<><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></>} />;
+        const ReciteIcon = ({ className }) => <IconBase className={className} d={<><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></>} />;
+        const FilterIcon = ({ className }) => <IconBase className={className} d={<><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></>} />;
+        const SettingsIcon = ({ className }) => <IconBase className={className} d={<><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></>} />;
+        const ListIcon = ({ className }) => <IconBase className={className} d={<><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></>} />;
+        const RepeatIcon = ({ className }) => <IconBase className={className} d={<><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></>} />;
+        const NextIcon = ({ className }) => <IconBase className={className} d={<><polygon points="5 4 15 12 5 20 5 4" /><line x1="19" y1="5" x2="19" y2="19" /></>} />;
+
+        // --- Services ---
+        const StorageService = {
+            getModules: () => {
+                const stored = localStorage.getItem('mindlex5_modules');
+                if (!stored) {
+                    const initial = [
+                        { id: SPECIAL_MODULE_IDS.FAVORITES, name: '收藏', isSpecial: true, type: 'favorites' },
+                        { id: SPECIAL_MODULE_IDS.TRASH, name: '垃圾桶', isSpecial: true, type: 'trash' },
+                    ];
+                    localStorage.setItem('mindlex5_modules', JSON.stringify(initial));
+                    return initial;
+                }
+                return JSON.parse(stored);
+            },
+            saveModules: (modules) => localStorage.setItem('mindlex5_modules', JSON.stringify(modules)),
+            getWords: () => {
+                const stored = localStorage.getItem('mindlex5_words');
+                return stored ? JSON.parse(stored) : [];
+            },
+            saveWords: (words) => localStorage.setItem('mindlex5_words', JSON.stringify(words)),
+            addModule: (name) => {
+                const modules = StorageService.getModules();
+                const newModule = {
+                    id: `mod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    name,
+                    isSpecial: false,
+                    type: 'normal',
+                };
+                StorageService.saveModules([...modules, newModule]);
+                return newModule;
+            },
+            updateModule: (id, name) => {
+                const modules = StorageService.getModules().map(m => m.id === id ? { ...m, name } : m);
+                StorageService.saveModules(modules);
+            },
+            deleteModule: (moduleId) => {
+                const modules = StorageService.getModules().filter(m => m.id !== moduleId);
+                StorageService.saveModules(modules);
+                const words = StorageService.getWords().filter(w => w.moduleId !== moduleId);
+                StorageService.saveWords(words);
+                ['mindlex5_recite_sessions', 'mindlex5_screening_sessions'].forEach(key => {
+                    const stored = localStorage.getItem(key);
+                    if(stored) {
+                        const s = JSON.parse(stored);
+                        if(s[moduleId]) { delete s[moduleId]; localStorage.setItem(key, JSON.stringify(s)); }
+                    }
+                });
+            },
+            importWords: (moduleId, rawData) => {
+                const allWords = StorageService.getWords();
+                const trashWords = allWords.filter(w => w.moduleId === SPECIAL_MODULE_IDS.TRASH);
+                const validData = rawData.filter(d => !trashWords.some(t => t.text.toLowerCase() === d.text.toLowerCase()));
+                const newWords = validData.map(d => ({
+                    id: `word_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    text: d.text,
+                    definition: d.def,
+                    status: WordStatus.Unmastered,
+                    moduleId: moduleId,
+                    isFavorite: false,
+                    createdAt: Date.now(),
+                }));
+                StorageService.saveWords([...allWords, ...newWords]);
+            },
+            getReciteSession: (moduleId) => {
+                try {
+                    const stored = localStorage.getItem('mindlex5_recite_sessions');
+                    return stored ? (JSON.parse(stored)[moduleId] || null) : null;
+                } catch(e) { return null; }
+            },
+            saveReciteSession: (moduleId, queueIds, currentIndex) => {
+                try {
+                    const stored = localStorage.getItem('mindlex5_recite_sessions');
+                    const sessions = stored ? JSON.parse(stored) : {};
+                    sessions[moduleId] = { moduleId, queueIds, currentIndex };
+                    localStorage.setItem('mindlex5_recite_sessions', JSON.stringify(sessions));
+                } catch(e) {}
+            },
+            getScreeningSession: (moduleId) => {
+                 try {
+                    const stored = localStorage.getItem('mindlex5_screening_sessions');
+                    return stored ? (JSON.parse(stored)[moduleId] || null) : null;
+                } catch(e) { return null; }
+            },
+            saveScreeningSession: (moduleId, queueIds, currentIndex) => {
+                try {
+                    const stored = localStorage.getItem('mindlex5_screening_sessions');
+                    const sessions = stored ? JSON.parse(stored) : {};
+                    sessions[moduleId] = { moduleId, queueIds, currentIndex };
+                    localStorage.setItem('mindlex5_screening_sessions', JSON.stringify(sessions));
+                } catch(e) {}
+            },
+            clearScreeningSession: (moduleId) => {
+                 try {
+                    const stored = localStorage.getItem('mindlex5_screening_sessions');
+                    if (stored) {
+                        const sessions = JSON.parse(stored);
+                        if(sessions[moduleId]) {
+                            delete sessions[moduleId];
+                            localStorage.setItem('mindlex5_screening_sessions', JSON.stringify(sessions));
+                        }
+                    }
+                } catch(e) {}
+            },
+            getSettings: () => {
+                try {
+                    const stored = localStorage.getItem('mindlex5_settings');
+                    return stored ? JSON.parse(stored) : { groupSize: 30 };
+                } catch(e) { return { groupSize: 30 }; }
+            },
+            saveSettings: (settings) => {
+                localStorage.setItem('mindlex5_settings', JSON.stringify(settings));
+            }
+        };
+
+        const ExcelService = {
+            readRawExcel: (file) => {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = e.target?.result;
+                            
+                            // Explicitly check if library loaded
+                            if (!window.XLSX) {
+                                reject(new Error("Excel library (XLSX) is not loaded. Please check your connection or try reloading."));
+                                return;
+                            }
+
+                            // Use 'array' type for robustness
+                            const workbook = window.XLSX.read(data, { type: 'array' });
+                            const firstSheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[firstSheetName];
+                            const jsonData = window.XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                            resolve(jsonData);
+                        } catch (err) { reject(err); }
+                    };
+                    reader.onerror = (err) => reject(err);
+                    
+                    // Use ArrayBuffer instead of BinaryString for better compatibility
+                    reader.readAsArrayBuffer(file);
+                });
+            },
+            parseImportData: (rawData, wordColIndex, defColIndex, hasHeader) => {
+                const result = [];
+                const startIndex = hasHeader ? 1 : 0;
+                for (let i = startIndex; i < rawData.length; i++) {
+                    const row = rawData[i];
+                    if (!row) continue;
+                    const text = String(row[wordColIndex] || '').trim();
+                    const def = String(row[defColIndex] || '').trim();
+                    if (text) result.push({ text, def });
+                }
+                return result;
+            },
+            exportToExcel: (words, fileName) => {
+                if (!window.XLSX) { alert("Export failed: Library not loaded."); return; }
+                const data = [['单词', '释义'], ...words.map(w => [w.text, w.definition])];
+                const worksheet = window.XLSX.utils.aoa_to_sheet(data);
+                const workbook = window.XLSX.utils.book_new();
+                window.XLSX.utils.book_append_sheet(workbook, worksheet, "Words");
+                window.XLSX.writeFile(workbook, `${fileName}.xlsx`);
+            }
+        };
+
+        const speak = (text) => {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            window.speechSynthesis.speak(utterance);
+        };
+
+        // --- Helper Components ---
+        // OPTIMIZED: Added animate-fade-in and backdrop-blur-sm
+        const ConfirmModal = ({ title, message, onConfirm, onCancel }) => (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={(e) => { e.stopPropagation(); onCancel(); }}>
+                <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                    <div className="p-6">
+                        <h3 className="text-xl font-bold text-gray-900 mb-2">{title}</h3>
+                        <p className="text-gray-600 leading-relaxed">{message}</p>
+                    </div>
+                    <div className="bg-gray-50 p-4 flex gap-3 justify-end border-t border-gray-100">
+                        <button onClick={onCancel} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 font-medium">取消</button>
+                        <button onClick={onConfirm} className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 font-medium flex items-center gap-2">
+                            <TrashIcon className="w-4 h-4" /> 确定删除
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+
+        // OPTIMIZED: Added animate-fade-in and backdrop-blur-sm
+        const GroupSelectModal = ({ totalGroups, maxGroup, onSelect, onClose }) => {
+            const visitedGroups = maxGroup > 0 ? Array.from({length: maxGroup}, (_, i) => i + 1) : [];
+            
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-fade-in" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+                    <div className="bg-white rounded-xl w-full max-w-sm flex flex-col shadow-2xl max-h-[70vh]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-4 border-b font-bold text-lg">选择复习词组</div>
+                        <div className="overflow-y-auto p-2 flex-1">
+                            <p className="text-xs text-gray-500 mb-2 px-2">只能选择已完成的词组</p>
+                            {visitedGroups.length === 0 ? (
+                                <div className="p-8 text-center text-gray-400">
+                                    暂无已完成的小组
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-3 gap-2">
+                                    {visitedGroups.map(g => (
+                                        <button 
+                                            key={g} 
+                                            onClick={() => onSelect(g)}
+                                            className="py-3 bg-indigo-50 hover:bg-indigo-100 text-primary font-bold rounded-lg border border-indigo-100"
+                                        >
+                                            第 {g} 组
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-4 border-t bg-gray-50 rounded-b-xl">
+                            <button onClick={onClose} className="w-full py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 font-medium">取消</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // OPTIMIZED: Added animate-fade-in and backdrop-blur-sm
+        const SettingsModal = ({ groupSize, onSave, onClose }) => {
+            const [size, setSize] = useState(groupSize);
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-fade-in" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+                    <div className="bg-white rounded-xl w-full max-w-xs p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold mb-4">背诵设置</h3>
+                        <div className="mb-6">
+                            <label className="block text-sm text-gray-600 mb-2">每组单词数量</label>
+                            <input 
+                                type="number" 
+                                value={size} 
+                                onChange={(e) => setSize(Number(e.target.value))} 
+                                className="w-full border p-2 rounded-lg text-center text-lg font-bold text-primary"
+                                min="5" max="100"
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={onClose} className="flex-1 py-2 border rounded-lg">取消</button>
+                            <button onClick={() => onSave(size)} className="flex-1 py-2 bg-primary text-white rounded-lg">保存</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // OPTIMIZED: Added animate-fade-in and backdrop-blur-sm
+        const ImportConfigModal = ({ rawData, fileName, onCancel, onConfirm }) => {
+            const [wordCol, setWordCol] = useState(0);
+            const [defCol, setDefCol] = useState(1);
+            const [hasHeader, setHasHeader] = useState(true);
+
+            const maxCols = rawData.length > 0 ? rawData.reduce((max, row) => Math.max(max, row.length), 0) : 0;
+            const colOptions = Array.from({ length: maxCols }, (_, i) => ({
+                value: i,
+                label: `列 ${String.fromCharCode(65 + i)}`
+            }));
+            const previewRows = rawData.slice(0, 5);
+
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-fade-in" onClick={(e) => { e.stopPropagation(); onCancel(); }}>
+                    <div className="bg-white rounded-xl w-full max-w-lg flex flex-col shadow-2xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-5 border-b">
+                            <h3 className="text-lg font-bold">导入设置: {fileName}</h3>
+                            <p className="text-sm text-gray-500">请选择对应的列</p>
+                        </div>
+                        <div className="p-5 overflow-y-auto flex-1">
+                            <div className="flex gap-4 mb-6">
+                                <div className="flex-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">单词所在列</label>
+                                    <select value={wordCol} onChange={(e) => setWordCol(Number(e.target.value))} className="w-full border rounded-lg p-2">
+                                        {colOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                    </select>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">释义所在列</label>
+                                    <select value={defCol} onChange={(e) => setDefCol(Number(e.target.value))} className="w-full border rounded-lg p-2">
+                                        {colOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 mb-4">
+                                <input type="checkbox" id="hasHeader" checked={hasHeader} onChange={(e) => setHasHeader(e.target.checked)} className="w-4 h-4" />
+                                <label htmlFor="hasHeader" className="text-gray-700 select-none">第一行是表头（不导入）</label>
+                            </div>
+                            <div className="border rounded-lg overflow-hidden">
+                                <div className="bg-gray-100 px-3 py-2 text-xs font-bold text-gray-500 border-b">预览 (前5行)</div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm text-left">
+                                        <thead>
+                                            <tr className="bg-gray-50 border-b">
+                                                {colOptions.map(opt => (
+                                                    <th key={opt.value} className={`px-3 py-2 font-medium ${opt.value === wordCol ? 'text-primary bg-blue-50' : opt.value === defCol ? 'text-green-600 bg-green-50' : 'text-gray-500'}`}>
+                                                        {opt.label} {opt.value === wordCol ? '(单词)' : opt.value === defCol ? '(释义)' : ''}
+                                                    </th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {previewRows.map((row, rIdx) => (
+                                                <tr key={rIdx} className={`border-b last:border-0 ${hasHeader && rIdx === 0 ? 'opacity-50 line-through bg-gray-50' : ''}`}>
+                                                    {colOptions.map(col => (
+                                                        <td key={col.value} className="px-3 py-2 whitespace-nowrap max-w-[150px] overflow-hidden text-ellipsis border-r last:border-0">
+                                                            {row[col.value]}
+                                                        </td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-5 border-t bg-gray-50 rounded-b-xl flex justify-end gap-3">
+                            <button onClick={onCancel} className="px-4 py-2 bg-white border rounded-lg hover:bg-gray-100">取消</button>
+                            <button onClick={() => onConfirm(wordCol, defCol, hasHeader)} className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-indigo-700">确认导入</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // OPTIMIZED: Added animate-fade-in and backdrop-blur-sm
+        const MoveModal = ({ modules, onClose, onConfirm }) => {
+            const normalModules = modules.filter(m => !m.isSpecial);
+            return (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in" onClick={(e) => { e.stopPropagation(); onClose(); }}>
+                    <div className="bg-white rounded-xl w-full max-w-sm max-h-[80vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                        <div className="p-4 border-b font-bold text-lg">移动到...</div>
+                        <div className="overflow-y-auto p-2 flex-1">
+                            {normalModules.length === 0 && <div className="p-4 text-gray-500 text-center">无普通模块</div>}
+                            {normalModules.map(m => (
+                                <div key={m.id} className="mb-2 border rounded-lg overflow-hidden">
+                                    <div className="p-2 font-semibold text-gray-700 bg-gray-100">{m.name}</div>
+                                    <button onClick={() => onConfirm(m.id, WordStatus.Unmastered)} className="w-full text-left p-3 hover:bg-blue-50 pl-6 border-b border-gray-100 transition-colors text-sm">未掌握</button>
+                                    <button onClick={() => onConfirm(m.id, WordStatus.Mastered)} className="w-full text-left p-3 hover:bg-green-50 pl-6 border-b border-gray-100 transition-colors text-sm">已掌握</button>
+                                    <button onClick={() => onConfirm(m.id, WordStatus.TooSimple)} className="w-full text-left p-3 hover:bg-gray-50 pl-6 transition-colors text-sm">太简单</button>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t bg-gray-50 rounded-b-xl">
+                            <button onClick={onClose} className="w-full py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 font-medium">取消</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Views ---
+        const HomeView = ({ modules, onImportClick, onSelectModule, onRequestDelete }) => {
+            const specialModules = modules.filter(m => m.isSpecial);
+            const normalModules = modules.filter(m => !m.isSpecial);
+            return (
+                <div className="flex flex-col h-full bg-gray-50 animate-fade-in">
+                    <header className="flex justify-between items-center p-6 bg-white shadow-sm sticky top-0 z-10">
+                        <div className="flex items-center gap-2">
+                            <BrainIcon className="w-8 h-8 text-primary" />
+                            <h1 className="text-xl font-bold text-gray-800">MindLex 1.0</h1>
+                        </div>
+                        <button onClick={onImportClick} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition active:scale-95 shadow-md">
+                            <ImportIcon className="w-5 h-5" />
+                            <span className="hidden sm:inline">导入单词</span>
+                        </button>
+                    </header>
+                    <main className="flex-1 p-4 overflow-y-auto space-y-6">
+                        <section>
+                            <div className="flex items-center gap-2 mb-3 px-1">
+                                <StarIcon className="w-5 h-5 text-yellow-500" filled />
+                                <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider">常用功能</h2>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                {specialModules.map(module => (
+                                    <div key={module.id} onClick={() => onSelectModule(module)} className={`p-5 rounded-xl shadow-sm cursor-pointer transition transform hover:-translate-y-1 hover:shadow-md border flex flex-col justify-between h-32 ${module.id === SPECIAL_MODULE_IDS.FAVORITES ? 'bg-gradient-to-br from-yellow-50 to-orange-50 border-yellow-200' : 'bg-gradient-to-br from-red-50 to-pink-50 border-red-200'}`}>
+                                        <div className="flex justify-between items-start">
+                                            <h3 className={`text-lg font-bold ${module.id === SPECIAL_MODULE_IDS.FAVORITES ? 'text-yellow-800' : 'text-red-800'}`}>{module.name}</h3>
+                                            {module.id === SPECIAL_MODULE_IDS.FAVORITES ? <StarIcon className="w-6 h-6 text-yellow-500" filled /> : <TrashIcon className="w-6 h-6 text-red-500" />}
+                                        </div>
+                                        <p className={`text-xs font-bold uppercase tracking-wide opacity-70 ${module.id === SPECIAL_MODULE_IDS.FAVORITES ? 'text-yellow-700' : 'text-red-700'}`}>{module.id === SPECIAL_MODULE_IDS.FAVORITES ? '重点复习' : '回收站'}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                        <div className="border-t border-gray-200 mx-2"></div>
+                        <section>
+                            <div className="flex items-center gap-2 mb-3 px-1">
+                                <ReciteIcon className="w-5 h-5 text-primary" />
+                                <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider">我的单词本</h2>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {normalModules.length === 0 ? (
+                                    <div className="col-span-full py-8 text-center text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">点击右上角导入 Excel 单词表</div>
+                                ) : normalModules.map(module => (
+                                    <div key={module.id} onClick={() => onSelectModule(module)} className="relative p-6 bg-white rounded-xl shadow-sm border border-gray-100 transition transform hover:-translate-y-1 hover:shadow-md group cursor-pointer">
+                                        <div className="h-full pr-8">
+                                            <h3 className="text-lg font-bold text-gray-800 break-words line-clamp-2">{module.name}</h3>
+                                            <p className="mt-2 text-xs text-gray-400">点击进入详情</p>
+                                        </div>
+                                        <button type="button" onClick={(e) => { e.stopPropagation(); e.preventDefault(); onRequestDelete(module); }} className="absolute top-4 right-4 p-2 bg-gray-50 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition z-20">
+                                            <TrashIcon className="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    </main>
+                </div>
+            );
+        };
+
+        const ModuleDetailView = ({ module, counts, onBack, onRename, onSelectSubGroup, onRecite, onScreen, onReset }) => {
+            const total = counts[WordStatus.Mastered] + counts[WordStatus.Unmastered] + counts[WordStatus.TooSimple];
+            const progress = total > 0 ? Math.round(((counts[WordStatus.Mastered] + counts[WordStatus.TooSimple]) / total) * 100) : 0;
+            const [isEditing, setIsEditing] = useState(false);
+            const [editName, setEditName] = useState(module.name);
+
+            useEffect(() => { setEditName(module.name); }, [module.name]);
+            const handleRenameSubmit = () => { if (editName.trim()) { onRename(editName.trim()); setIsEditing(false); } };
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50 animate-fade-in">
+                    <header className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-10">
+                        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full"><BackIcon className="w-6 h-6" /></button>
+                        {isEditing ? (
+                            <div className="flex-1 flex gap-2">
+                                <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="flex-1 border border-primary rounded px-2 py-1" autoFocus onKeyDown={(e) => { if(e.key === 'Enter') handleRenameSubmit(); }} />
+                                <button onClick={handleRenameSubmit} className="bg-primary text-white px-3 py-1 rounded text-sm">确定</button>
+                                <button onClick={() => { setIsEditing(false); setEditName(module.name); }} className="bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm">取消</button>
+                            </div>
+                        ) : (
+                            <div className="flex-1 flex items-center gap-2 min-w-0 cursor-pointer" onClick={() => setIsEditing(true)}>
+                                <h2 className="text-lg font-bold truncate hover:text-primary transition">{module.name}</h2>
+                                <button className="p-1 text-gray-400 hover:text-primary"><EditIcon className="w-4 h-4" /></button>
+                            </div>
+                        )}
+                    </header>
+                    <main className="flex-1 p-4 overflow-y-auto">
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            <button onClick={onRecite} className="flex flex-col items-center justify-center p-6 bg-indigo-600 text-white rounded-2xl shadow-lg hover:bg-indigo-700 active:scale-95 transition-all h-44 border-b-4 border-indigo-800">
+                                <ReciteIcon className="w-16 h-16 mb-3" /><span className="text-2xl font-bold tracking-wider">背诵</span>
+                            </button>
+                            <button onClick={onScreen} className="flex flex-col items-center justify-center p-6 bg-white text-emerald-600 border-2 border-emerald-100 rounded-2xl shadow-md hover:bg-emerald-50 active:scale-95 transition-all h-44">
+                                <FilterIcon className="w-16 h-16 mb-3" /><span className="text-2xl font-bold tracking-wider">筛查</span>
+                            </button>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl shadow-sm mb-6 flex items-center justify-between">
+                            <div><div className="text-sm text-gray-500 mb-1">掌握进度</div><div className="text-3xl font-bold text-gray-900">{progress}%</div></div>
+                            <div className="text-right text-xs text-gray-400"><div>已掌握: {counts[WordStatus.Mastered]}</div><div>太简单: {counts[WordStatus.TooSimple]}</div><div>总词数: {total}</div></div>
+                        </div>
+                        <div className="grid gap-3">
+                            <div onClick={() => onSelectSubGroup(WordStatus.Unmastered)} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-400 cursor-pointer hover:bg-gray-50 flex justify-between items-center transition group"><span className="font-medium text-gray-700 group-hover:text-indigo-600 transition">未掌握</span><span className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full text-sm font-bold">{counts[WordStatus.Unmastered]}</span></div>
+                            <div onClick={() => onSelectSubGroup(WordStatus.Mastered)} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-emerald-400 cursor-pointer hover:bg-gray-50 flex justify-between items-center transition group"><span className="font-medium text-gray-700 group-hover:text-emerald-600 transition">已掌握</span><span className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-sm font-bold">{counts[WordStatus.Mastered]}</span></div>
+                            <div onClick={() => onSelectSubGroup(WordStatus.TooSimple)} className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-gray-400 cursor-pointer hover:bg-gray-50 flex justify-between items-center transition group"><span className="font-medium text-gray-700 group-hover:text-gray-600 transition">太简单</span><span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-bold">{counts[WordStatus.TooSimple]}</span></div>
+                        </div>
+                        <button onClick={onReset} className="w-full mt-8 py-3 bg-transparent text-gray-400 text-sm hover:text-gray-600 flex items-center justify-center gap-2 transition"><ResetIcon className="w-4 h-4" /> 重置进度</button>
+                    </main>
+                </div>
+            );
+        };
+
+        const WordListView = ({ words, title, isSpecial, moduleId, subGroup, onBack, onWordAction }) => {
+            const [selectedIds, setSelectedIds] = useState(new Set());
+            const selectionMode = selectedIds.size > 0;
+            const toggleSelection = (id) => {
+                const newSet = new Set(selectedIds);
+                if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
+                setSelectedIds(newSet);
+            };
+            const handleSelectAll = () => { if (selectedIds.size === words.length) setSelectedIds(new Set()); else setSelectedIds(new Set(words.map(w => w.id))); };
+            const handleBulkAction = (action) => { onWordAction(action, Array.from(selectedIds)); if (action !== 'favorite') setSelectedIds(new Set()); };
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50 animate-fade-in">
+                    <header className="bg-white p-4 shadow-sm flex items-center gap-4 sticky top-0 z-20">
+                        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full"><BackIcon className="w-6 h-6" /></button>
+                        <h2 className="text-lg font-bold truncate flex-1">{title}</h2>
+                        {selectionMode ? (
+                            <div className="flex gap-1">
+                                <button onClick={handleSelectAll} className="p-2 hover:bg-gray-100 rounded-full text-gray-600" title="全选"><SelectAllIcon className="w-5 h-5" /></button>
+                                <button onClick={() => handleBulkAction('move')} className="p-2 hover:bg-gray-100 rounded-full text-blue-600" title="转移"><MoveIcon className="w-5 h-5" /></button>
+                                {moduleId !== SPECIAL_MODULE_IDS.FAVORITES && <button onClick={() => handleBulkAction('favorite')} className="p-2 hover:bg-gray-100 rounded-full text-yellow-500" title="收藏"><StarIcon className="w-5 h-5" /></button>}
+                                <button onClick={() => handleBulkAction('delete')} className="p-2 hover:bg-gray-100 rounded-full text-red-500" title="删除"><TrashIcon className="w-5 h-5" /></button>
+                            </div>
+                        ) : (
+                            <button onClick={() => onWordAction('export')} className="p-2 hover:bg-gray-100 rounded-full text-gray-600" title="导出"><ExportIcon className="w-6 h-6 mt-1" /></button>
+                        )}
+                    </header>
+                    <main className="flex-1 overflow-y-auto">
+                        {words.length === 0 ? <div className="flex items-center justify-center h-full text-gray-400">暂无单词</div> : (
+                            <div className="divide-y divide-gray-100">
+                                {words.map(word => (
+                                    <div key={word.id} className={`flex items-center p-4 bg-white hover:bg-gray-50 transition ${selectedIds.has(word.id) ? 'bg-blue-50' : ''}`}>
+                                        <div onClick={() => toggleSelection(word.id)} className={`w-6 h-6 rounded-full border-2 mr-4 flex-shrink-0 cursor-pointer flex items-center justify-center ${selectedIds.has(word.id) ? 'bg-primary border-primary' : 'border-gray-300'}`}>
+                                            {selectedIds.has(word.id) && <div className="w-2 h-2 bg-white rounded-full" />}
+                                        </div>
+                                        <div onClick={() => onWordAction('view', word)} className="flex-1 cursor-pointer min-w-0">
+                                            <div className="font-bold text-lg text-gray-800 truncate">{word.text}</div>
+                                            <div className="text-sm text-gray-500 truncate">{word.definition}</div>
+                                        </div>
+                                        <div className="flex gap-3 ml-2">
+                                            <button onClick={() => speak(word.text)} className="p-1 text-gray-400 hover:text-primary"><SpeakerIcon className="w-5 h-5" /></button>
+                                            {moduleId !== SPECIAL_MODULE_IDS.FAVORITES && <button onClick={() => onWordAction('favorite', [word.id])} className="p-1"><StarIcon className="w-5 h-5" filled={word.isFavorite} /></button>}
+                                            <button onClick={() => onWordAction('delete', [word.id])} className="p-1 text-gray-400 hover:text-red-500"><TrashIcon className="w-5 h-5" /></button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        const WordDetailView = ({ word, onBack, onUpdateWord, onMoveRequest, onDeleteWord, onToggleFavorite }) => {
+            const [isEditing, setIsEditing] = useState(false);
+            const [def, setDef] = useState(word.definition);
+            const handleSave = () => { onUpdateWord(word.id, def); setIsEditing(false); };
+            const handleSearch = () => { window.open(`https://www.baidu.com/s?wd=${word.text}`, '_blank'); };
+
+            return (
+                <div className="flex flex-col h-full bg-white animate-fade-in absolute inset-0 z-50">
+                    <header className="p-4 shadow-sm flex items-center justify-between sticky top-0 bg-white z-10">
+                        <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full"><BackIcon className="w-6 h-6" /></button>
+                        <div className="flex gap-2">
+                            <button onClick={() => onMoveRequest([word.id])} className="p-2 hover:bg-blue-50 text-blue-500 rounded-full"><MoveIcon className="w-6 h-6" /></button>
+                            <button onClick={() => onToggleFavorite(word.id)} className="p-2 hover:bg-yellow-50 rounded-full"><StarIcon className="w-6 h-6" filled={word.isFavorite} /></button>
+                            <button onClick={() => onDeleteWord(word.id)} className="p-2 hover:bg-red-50 text-red-500 rounded-full"><TrashIcon className="w-6 h-6" /></button>
+                        </div>
+                    </header>
+                    <main className="flex-1 flex flex-col items-center p-4 overflow-y-auto">
+                        <div className="w-full max-w-3xl mt-12 flex flex-col gap-6 px-4">
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 w-full">
+                                <div />
+                                <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 text-center tracking-tight break-words min-w-0">{word.text}</h1>
+                                <div className="flex gap-2 justify-start">
+                                    <button onClick={() => speak(word.text)} className="p-2 bg-indigo-50 text-primary rounded-lg hover:bg-indigo-100 transition shadow-sm" title="朗读"><SpeakerIcon className="w-5 h-5" /></button>
+                                    <button onClick={handleSearch} className="p-2 bg-gray-50 text-gray-500 rounded-lg hover:bg-gray-100 transition shadow-sm" title="搜索"><SearchIcon className="w-5 h-5" /></button>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-4 w-full">
+                                <div />
+                                {isEditing ? (
+                                    <div className="w-full min-w-[200px] max-w-md">
+                                        <textarea value={def} onChange={(e) => setDef(e.target.value)} className="w-full p-3 border rounded-xl h-24 text-lg focus:ring-2 focus:ring-primary outline-none" autoFocus />
+                                        <div className="flex gap-2 mt-2 justify-end">
+                                            <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm">取消</button>
+                                            <button onClick={handleSave} className="px-3 py-1 bg-primary text-white rounded-lg text-sm">保存</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-gray-50 px-4 py-2 rounded-xl border border-gray-100 shadow-sm max-w-md w-full text-center"><p className="text-xl text-gray-700 leading-snug line-clamp-2">{word.definition}</p></div>
+                                )}
+                                <div className="flex justify-start pt-1">
+                                    {!isEditing && <button onClick={() => setIsEditing(true)} className="p-2 text-gray-300 hover:text-primary transition hover:bg-gray-50 rounded-full" title="编辑释义"><EditIcon className="w-5 h-5" /></button>}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const ReciteView = ({ moduleId, allWords, moduleWords, onExit, onUpdateWordStatus, onToggleFavorite, onUpdateWord, onMoveRequest, onDeleteWord }) => {
+            const [queueIds, setQueueIds] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [subSessionQueue, setSubSessionQueue] = useState(null);
+            const [subIndex, setSubIndex] = useState(0);
+            const [showDef, setShowDef] = useState(false);
+            const [viewingDetailId, setViewingDetailId] = useState(null);
+            const [isEditing, setIsEditing] = useState(false);
+            const [editDef, setEditDef] = useState('');
+            const [showSettings, setShowSettings] = useState(false);
+            const [showGroupSelect, setShowGroupSelect] = useState(false);
+            const [groupSize, setGroupSize] = useState(30);
+            
+            // New state for intermission
+            const [intermission, setIntermission] = useState(null); // { type: 'GROUP_END' | 'REVIEW_END', groupNum: number }
+
+            useEffect(() => {
+                const settings = StorageService.getSettings();
+                setGroupSize(settings.groupSize);
+                if (moduleWords.length === 0) return;
+                const session = StorageService.getReciteSession(moduleId);
+                const currentUnmasteredIds = moduleWords.map(w => w.id);
+                if (session) {
+                    const validQueue = session.queueIds.filter(id => currentUnmasteredIds.includes(id));
+                    if (validQueue.length > 0 && session.currentIndex < validQueue.length) {
+                        setQueueIds(validQueue);
+                        setCurrentIndex(session.currentIndex);
+                        return;
+                    }
+                }
+                const shuffled = [...currentUnmasteredIds].sort(() => Math.random() - 0.5);
+                setQueueIds(shuffled);
+                setCurrentIndex(0);
+                StorageService.saveReciteSession(moduleId, shuffled, 0);
+            }, []);
+
+            useEffect(() => { if (queueIds.length > 0) StorageService.saveReciteSession(moduleId, queueIds, currentIndex); }, [currentIndex, queueIds, moduleId]);
+            useEffect(() => { StorageService.saveSettings({ groupSize }); }, [groupSize]);
+            useEffect(() => { 
+                const validWords = new Set(allWords.map(w => w.id));
+                setQueueIds(prev => prev.filter(id => validWords.has(id))); 
+                if(subSessionQueue) setSubSessionQueue(prev => prev.filter(id => validWords.has(id)));
+            }, [allWords]);
+
+            const isSubSession = subSessionQueue !== null;
+            const effectiveQueue = isSubSession ? subSessionQueue : queueIds;
+            const effectiveIndex = isSubSession ? subIndex : currentIndex;
+            
+            // Should hide main UI if we are in intermission or viewing details
+            const shouldHideMain = intermission !== null || viewingDetailId !== null;
+            
+            if (!effectiveQueue && !intermission) return null;
+
+            const totalGroups = Math.ceil(queueIds.length / groupSize) || 1;
+            const currentGroup = Math.min(Math.floor(currentIndex / groupSize) + 1, totalGroups);
+
+            const handleStartGroupReview = (groupNum) => {
+                const startIdx = (groupNum - 1) * groupSize;
+                const endIdx = startIdx + groupSize;
+                const potentialIds = queueIds.slice(startIdx, endIdx);
+                const groupWords = potentialIds.filter(id => {
+                    const w = allWords.find(aw => aw.id === id);
+                    return w && w.status !== WordStatus.TooSimple;
+                });
+
+                if (groupWords.length === 0) {
+                    alert("该组单词已全部移除或太简单，建议进入下一组。");
+                    return;
+                }
+
+                const shuffledGroup = [...groupWords].sort(() => Math.random() - 0.5);
+                setSubSessionQueue(shuffledGroup);
+                setSubIndex(0);
+                setShowDef(false);
+                setShowGroupSelect(false);
+                setIntermission(null);
+            };
+
+            const handleExitSubSession = () => {
+                setSubSessionQueue(null);
+                setSubIndex(0);
+                setShowDef(false);
+                setIntermission(null);
+            };
+
+            const handleIntermissionNext = () => {
+                // If we were at group end, move to next group
+                if (intermission?.type === 'GROUP_END') {
+                   setCurrentIndex(prev => prev + 1);
+                   setIntermission(null);
+                } 
+                // If we were at review end, exit subsession and move to next group (if applicable)
+                else if (intermission?.type === 'REVIEW_END') {
+                    handleExitSubSession();
+                    // Check if we need to advance main index (if we were reviewing the current group)
+                    // If reviewing an old group, we just stay where we were in main queue
+                    // If reviewing current completed group, advance.
+                    // For simplicity, user chose "Next Group", so we assume they want to proceed in main queue
+                    // But if main queue wasn't blocked, maybe just continue?
+                    // The prompt implies: "Review End" -> "Recite Next Group".
+                    // If we just finished reviewing Group X, likely we want to start Group X+1.
+                    // We need to ensure main currentIndex is at the start of X+1.
+                    // If we reviewed an OLD group, maybe just return to where we were?
+                    // Let's assume standard flow: Review End -> Continue Recite (from where we left off)
+                    // But if we just finished the group, and then reviewed it, currentIndex is stuck at end of group.
+                    if ((currentIndex + 1) % groupSize === 0) {
+                        setCurrentIndex(prev => prev + 1);
+                    }
+                }
+            };
+
+            if (moduleWords.length === 0 && queueIds.length === 0) return <div className="h-full flex flex-col items-center justify-center bg-gray-50"><div className="text-xl text-gray-500 mb-4">没有单词可以背诵</div><button onClick={onExit} className="bg-primary text-white px-6 py-2 rounded-lg">返回</button></div>;
+            
+            if (viewingDetailId) {
+                const detailWord = allWords.find(w => w.id === viewingDetailId);
+                if (!detailWord) { setViewingDetailId(null); return null; }
+                return <WordDetailView word={detailWord} onBack={() => setViewingDetailId(null)} onUpdateWord={onUpdateWord} onMoveRequest={onMoveRequest} onDeleteWord={(id) => { onDeleteWord(id); setViewingDetailId(null); }} onToggleFavorite={onToggleFavorite} />;
+            }
+            
+            // Intermission View
+            if (intermission) {
+                return (
+                    <div className="h-full flex flex-col bg-gray-50 animate-fade-in">
+                        <header className="p-4">
+                            <button onClick={() => setIntermission(null)} className="p-2 hover:bg-gray-100 rounded-full bg-white shadow-sm inline-block">
+                                <BackIcon className="w-6 h-6" />
+                            </button>
+                        </header>
+                        <main className="flex-1 flex flex-col items-center justify-center p-6 gap-8 animate-fade-in">
+                            <div className="text-center">
+                                <div className="w-20 h-20 bg-indigo-100 text-primary rounded-full flex items-center justify-center mx-auto mb-6">
+                                    {intermission.type === 'GROUP_END' ? <ListIcon className="w-10 h-10" /> : <RepeatIcon className="w-10 h-10" />}
+                                </div>
+                                <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                                    {intermission.type === 'GROUP_END' ? `第 ${intermission.groupNum} 组背诵完成` : '小组复习完成'}
+                                </h2>
+                                <p className="text-gray-500">
+                                    {intermission.type === 'GROUP_END' ? '太棒了！要巩固一下还是继续新内容？' : '掌握得怎么样？'}
+                                </p>
+                            </div>
+                            <div className="w-full max-w-xs space-y-4">
+                                <button 
+                                    onClick={handleIntermissionNext}
+                                    className="w-full py-4 bg-primary text-white rounded-xl font-bold text-lg shadow-lg hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2"
+                                >
+                                    <span>{intermission.type === 'GROUP_END' ? '背诵下一组' : '背诵下一组'}</span>
+                                    <NextIcon className="w-5 h-5" />
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if (intermission.type === 'GROUP_END') {
+                                            handleStartGroupReview(intermission.groupNum);
+                                        } else {
+                                            // Review Again
+                                            const subGroupNum = intermission.groupNum || currentGroup;
+                                            handleStartGroupReview(subGroupNum);
+                                        }
+                                    }}
+                                    className="w-full py-4 bg-white text-primary border-2 border-primary rounded-xl font-bold text-lg hover:bg-indigo-50 active:scale-95 transition flex items-center justify-center gap-2"
+                                >
+                                    <RepeatIcon className="w-5 h-5" />
+                                    <span>{intermission.type === 'GROUP_END' ? '去复习' : '继续复习'}</span>
+                                </button>
+                                <button 
+                                    onClick={onExit}
+                                    className="w-full py-4 bg-gray-100 text-gray-600 rounded-xl font-bold text-lg shadow-sm hover:bg-gray-200 active:scale-95 transition flex items-center justify-center gap-2"
+                                >
+                                    <span>退出</span>
+                                </button>
+                            </div>
+                        </main>
+                    </div>
+                )
+            }
+
+            const safeIndex = Math.min(effectiveIndex, effectiveQueue.length - 1);
+            const currentWordId = effectiveQueue.length > 0 ? effectiveQueue[safeIndex] : null;
+            const currentWord = currentWordId ? allWords.find(w => w.id === currentWordId) : null;
+
+            const handleNext = () => { 
+                setShowDef(false); setIsEditing(false); 
+                if (effectiveQueue.length === 0) return; 
+                
+                // Subsession Logic
+                if (isSubSession) {
+                    if (subIndex >= subSessionQueue.length - 1) {
+                         // End of review
+                         const groupNum = Math.ceil((queueIds.indexOf(subSessionQueue[0]) + 1) / groupSize) || currentGroup;
+                         setIntermission({ type: 'REVIEW_END', groupNum });
+                    } else {
+                        setSubIndex(prev => prev + 1);
+                    }
+                    return;
+                }
+
+                // Main Logic
+                if (safeIndex >= effectiveQueue.length - 1) { 
+                    // End of all words
+                     const freshIds = moduleWords.map(w => w.id); 
+                     const reshuffled = freshIds.sort(() => Math.random() - 0.5); 
+                     setQueueIds(reshuffled); 
+                     setCurrentIndex(0); 
+                } else { 
+                    // Check Group Boundary
+                    // We are at safeIndex. If (safeIndex + 1) is a multiple of groupSize, we just finished a group.
+                    if ((currentIndex + 1) % groupSize === 0) {
+                        setIntermission({ type: 'GROUP_END', groupNum: (currentIndex + 1) / groupSize });
+                    } else {
+                        setCurrentIndex(prev => prev + 1); 
+                    }
+                } 
+            };
+
+            const handlePrev = () => { 
+                if (safeIndex > 0) { 
+                    setShowDef(false); setIsEditing(false); 
+                    if(isSubSession) setSubIndex(prev => prev - 1);
+                    else setCurrentIndex(prev => prev - 1); 
+                } 
+            };
+
+            const handleSaveEdit = () => { if(currentWord) { onUpdateWord(currentWord.id, editDef); setIsEditing(false); } };
+            const handleSearch = () => { if(currentWord) window.open(`https://www.baidu.com/s?wd=${currentWord.text}`, '_blank'); };
+            
+            const handleTrash = () => {
+                if (currentWord) {
+                    onUpdateWordStatus(currentWord.id, WordStatus.TooSimple);
+                    handleNext();
+                }
+            };
+
+            if (!currentWord) return <div className="h-full flex items-center justify-center text-gray-500">准备中...</div>;
+
+            return (
+                <div className="flex flex-col h-full bg-white relative animate-fade-in">
+                    {showSettings && <SettingsModal groupSize={groupSize} onClose={() => setShowSettings(false)} onSave={(s) => { setGroupSize(s); setShowSettings(false); }} />}
+                    {showGroupSelect && <GroupSelectModal totalGroups={totalGroups} maxGroup={Math.floor(currentIndex / groupSize)} onClose={() => setShowGroupSelect(false)} onSelect={handleStartGroupReview} />}
+
+                    <div className="absolute top-4 left-4 z-20 flex gap-3 items-center flex-wrap">
+                        {isSubSession ? (
+                            <button onClick={handleExitSubSession} className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-full shadow-sm hover:bg-amber-100 border border-amber-200 font-bold transition-all active:scale-95">
+                                <ResetIcon className="w-4 h-4" /><span>退出分组复习</span>
+                            </button>
+                        ) : (
+                            <button onClick={onExit} className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 rounded-full shadow-sm hover:bg-gray-50 border border-gray-200 font-bold transition-all active:scale-95">
+                                <BackIcon className="w-4 h-4" /><span>保存并退出</span>
+                            </button>
+                        )}
+                        {!isSubSession && (
+                            <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm px-3 py-2 rounded-full shadow-sm border border-gray-200/50">
+                                <span className="text-xs font-bold text-gray-500 whitespace-nowrap pl-1">第 <span className="text-primary text-sm">{currentGroup}</span> / {totalGroups} 组</span>
+                                <div className="h-4 w-px bg-gray-300 mx-1"></div>
+                                <button onClick={() => setShowGroupSelect(true)} className="text-primary hover:bg-indigo-50 p-1.5 rounded-full transition" title="按组复习"><ListIcon className="w-4 h-4" /></button>
+                                <button onClick={() => setShowSettings(true)} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-full transition" title="设置"><SettingsIcon className="w-4 h-4" /></button>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="absolute top-4 right-4 z-10 flex gap-3">
+                        <button onClick={() => onToggleFavorite(currentWord.id)} className="p-3 bg-white/90 shadow rounded-full backdrop-blur-sm transition"><StarIcon className="w-6 h-6" filled={currentWord.isFavorite} /></button>
+                        <button onClick={handleTrash} className="p-3 bg-white/90 shadow rounded-full backdrop-blur-sm text-gray-500 hover:text-gray-700"><TrashIcon className="w-6 h-6" /></button>
+                    </div>
+
+                    <div onClick={() => { if(!isEditing) setShowDef(!showDef); }} className="flex-1 flex flex-col items-center justify-center p-8 cursor-pointer select-none mt-12 animate-fade-in" key={currentWord.id}>
+                        <div className="w-full max-w-3xl flex flex-col gap-6 px-4">
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 w-full">
+                                <div />
+                                <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 text-center tracking-tight break-words min-w-0" title="点击查看详情" onClick={(e) => { e.stopPropagation(); setViewingDetailId(currentWord.id); }}>{currentWord.text}</h1>
+                                <div className="flex justify-start gap-2">
+                                    <button onClick={(e) => { e.stopPropagation(); speak(currentWord.text); }} className="p-2 bg-indigo-50 text-primary rounded-lg hover:bg-indigo-100 transition shadow-sm" title="朗读"><SpeakerIcon className="w-5 h-5" /></button>
+                                    <button onClick={(e) => { e.stopPropagation(); handleSearch(); }} className="p-2 bg-gray-50 text-gray-500 rounded-lg hover:bg-gray-100 transition shadow-sm" title="搜索"><SearchIcon className="w-5 h-5" /></button>
+                                </div>
+                            </div>
+                            <div className={`transition-opacity duration-300 ${showDef ? 'opacity-100' : 'opacity-0'} w-full`}>
+                                <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-4 w-full">
+                                    <div />
+                                    {isEditing ? (
+                                        <div className="w-full min-w-[200px] max-w-md" onClick={(e) => e.stopPropagation()}>
+                                            <textarea value={editDef} onChange={(e) => setEditDef(e.target.value)} className="w-full p-3 border rounded-xl h-24 text-lg focus:ring-2 focus:ring-primary outline-none" autoFocus />
+                                            <div className="flex gap-2 mt-2 justify-end">
+                                                <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-gray-500 hover:bg-gray-100 rounded-lg text-sm">取消</button>
+                                                <button onClick={handleSaveEdit} className="px-3 py-1 bg-primary text-white rounded-lg text-sm">保存</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-gray-50 px-4 py-2 rounded-xl border border-gray-100 shadow-sm max-w-md w-full text-center"><p className="text-xl text-gray-700 leading-snug line-clamp-2">{currentWord.definition}</p></div>
+                                    )}
+                                    <div className="flex justify-start pt-1">
+                                        {!isEditing && <button onClick={(e) => { e.stopPropagation(); setEditDef(currentWord.definition); setIsEditing(true); }} className="p-2 text-gray-300 hover:text-primary transition hover:bg-gray-50 rounded-full" title="编辑释义"><EditIcon className="w-5 h-5" /></button>}
+                                    </div>
+                                </div>
+                            </div>
+                            {!showDef && <p className="mt-8 text-gray-300 text-sm text-center">点击屏幕显示释义</p>}
+                        </div>
+                    </div>
+                    <div className="p-6 bg-gray-50 flex justify-between gap-4 border-t">
+                        <button onClick={handlePrev} disabled={safeIndex === 0} className="flex-1 py-4 bg-white border rounded-xl shadow-sm text-lg font-bold disabled:opacity-50 text-gray-700">上一个</button>
+                        <button onClick={handleNext} className="flex-1 py-4 bg-primary text-white rounded-xl shadow-lg text-lg font-bold hover:bg-indigo-700 active:scale-95 transition">下一个</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const ScreeningView = ({ moduleId, allWords, moduleWords, onExit, onWordResult, onUpdateWordStatus, onToggleFavorite, onUpdateWord, onMoveRequest, onDeleteWord }) => {
+            const [queueIds, setQueueIds] = useState([]);
+            const [currentIndex, setCurrentIndex] = useState(0);
+            const [step, setStep] = useState('WORD');
+            const [viewingDetailId, setViewingDetailId] = useState(null);
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                if (moduleWords.length === 0) { setIsLoading(false); return; }
+                const session = StorageService.getScreeningSession(moduleId);
+                const currentUnmasteredIds = moduleWords.map(w => w.id);
+                if (session) {
+                    const validQueue = session.queueIds.filter(id => currentUnmasteredIds.includes(id));
+                    if (validQueue.length > 0 && session.currentIndex < validQueue.length) {
+                        setQueueIds(validQueue);
+                        setCurrentIndex(session.currentIndex);
+                        setIsLoading(false);
+                        return;
+                    }
+                }
+                const shuffled = [...currentUnmasteredIds].sort(() => Math.random() - 0.5);
+                setQueueIds(shuffled);
+                setCurrentIndex(0);
+                StorageService.saveScreeningSession(moduleId, shuffled, 0);
+                setIsLoading(false);
+            }, []);
+
+            useEffect(() => { if (!isLoading && queueIds.length > 0) StorageService.saveScreeningSession(moduleId, queueIds, currentIndex); }, [currentIndex, queueIds, moduleId, isLoading]);
+            useEffect(() => { setQueueIds(prev => prev.filter(id => allWords.some(w => w.id === id))); }, [allWords]);
+
+            if (!isLoading && moduleWords.length === 0) {
+                return (
+                    <div className="h-full flex flex-col items-center justify-center bg-gray-50">
+                        <div className="text-xl text-gray-500 mb-4">没有单词可以筛查</div>
+                        <button onClick={onExit} className="bg-primary text-white px-6 py-2 rounded-lg">返回</button>
+                    </div>
+                )
+            }
+
+            if (viewingDetailId) {
+                const detailWord = allWords.find(w => w.id === viewingDetailId);
+                if (!detailWord) { setViewingDetailId(null); return null; }
+                return <WordDetailView word={detailWord} onBack={() => setViewingDetailId(null)} onUpdateWord={onUpdateWord} onMoveRequest={onMoveRequest} onDeleteWord={(id) => { onDeleteWord(id); setViewingDetailId(null); }} onToggleFavorite={onToggleFavorite} />;
+            }
+
+            const safeIndex = Math.min(currentIndex, queueIds.length - 1);
+            const currentWordId = queueIds.length > 0 ? queueIds[safeIndex] : null;
+            const currentWord = currentWordId ? allWords.find(w => w.id === currentWordId) : null;
+
+            const handleNext = () => {
+                setStep('WORD');
+                if (safeIndex >= queueIds.length - 1) {
+                    alert('本轮筛查结束！');
+                    StorageService.clearScreeningSession(moduleId);
+                    onExit();
+                } else {
+                    setCurrentIndex(prev => prev + 1);
+                }
+            };
+
+            const handleResult = (correct) => {
+                if (currentWord) {
+                    onWordResult(currentWord.id, correct);
+                }
+                handleNext();
+            };
+
+            if (isLoading || !currentWord) return <div className="h-full flex items-center justify-center text-gray-500">准备中...</div>;
+
+            return (
+                <div className="flex flex-col h-full bg-white relative animate-fade-in">
+                    <div className="absolute top-4 left-4 z-20">
+                        <button onClick={onExit} className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 rounded-full shadow-sm hover:bg-gray-50 border border-gray-200 font-bold transition-all active:scale-95">
+                            <BackIcon className="w-4 h-4" /><span>保存并退出</span>
+                        </button>
+                    </div>
+                    <div className="absolute top-4 right-4 z-10 flex gap-3">
+                        <button onClick={() => onToggleFavorite(currentWord.id)} className="p-3 bg-white/90 shadow rounded-full backdrop-blur-sm transition"><StarIcon className="w-6 h-6" filled={currentWord.isFavorite} /></button>
+                        <button onClick={() => { onUpdateWordStatus(currentWord.id, WordStatus.TooSimple); handleNext(); }} className="p-3 bg-white/90 shadow rounded-full backdrop-blur-sm text-gray-500 hover:text-gray-700"><TrashIcon className="w-6 h-6" /></button>
+                    </div>
+                    <div className="flex-1 flex flex-col items-center justify-center p-8">
+                        <div className="w-full max-w-3xl flex flex-col gap-6 px-4">
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 w-full">
+                                <div />
+                                <h1 onClick={() => setViewingDetailId(currentWord.id)} className="text-5xl font-bold text-center break-words hover:text-primary transition cursor-pointer" title="点击查看详情">{currentWord.text}</h1>
+                                <div className="flex justify-start">
+                                    <button onClick={() => speak(currentWord.text)} className="p-2 bg-gray-100 rounded-full text-primary hover:bg-gray-200 transition"><SpeakerIcon className="w-6 h-6" /></button>
+                                </div>
+                            </div>
+                            {(step === 'DEF_KNOWN' || step === 'DEF_UNKNOWN') && (
+                                <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-4 w-full animate-fade-in">
+                                    <div /><p className="text-2xl text-gray-600 text-center px-4 py-2 bg-gray-50 rounded-lg max-w-lg">{currentWord.definition}</p><div />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="p-6 bg-gray-50 pb-10 border-t">
+                        {step === 'WORD' && (
+                            <div className="flex gap-4">
+                                <button onClick={() => setStep('DEF_UNKNOWN')} className="flex-1 py-5 bg-red-50 text-red-600 rounded-xl font-bold text-xl shadow-sm border border-red-100 hover:bg-red-100 transition">不认识</button>
+                                <button onClick={() => setStep('DEF_KNOWN')} className="flex-1 py-5 bg-green-50 text-green-600 rounded-xl font-bold text-xl shadow-sm border border-green-100 hover:bg-green-100 transition">认识</button>
+                            </div>
+                        )}
+                        {step === 'DEF_UNKNOWN' && <div className="w-full"><button onClick={handleNext} className="w-full py-5 bg-gray-800 text-white rounded-xl font-bold text-xl shadow-lg hover:bg-gray-700 transition">下一个</button></div>}
+                        {step === 'DEF_KNOWN' && (
+                            <div className="flex gap-4">
+                                <button onClick={() => handleResult(false)} className="flex-1 py-5 bg-red-500 text-white rounded-xl font-bold text-xl shadow-md hover:bg-red-600 transition">记忆错误</button>
+                                <button onClick={() => handleResult(true)} className="flex-1 py-5 bg-green-500 text-white rounded-xl font-bold text-xl shadow-md hover:bg-green-600 transition">记忆正确</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [modules, setModules] = useState([]);
+            const [words, setWords] = useState([]);
+            const [nav, setNav] = useState({ currentView: ViewName.HOME });
+            const [loading, setLoading] = useState(true);
+            const [moveModal, setMoveModal] = useState({ isOpen: false, wordIds: [] });
+            const [deleteModuleId, setDeleteModuleId] = useState(null);
+            const [importConfig, setImportConfig] = useState(null);
+            const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                setModules(StorageService.getModules());
+                setWords(StorageService.getWords());
+                setLoading(false);
+            }, []);
+
+            useEffect(() => {
+                if (!loading) StorageService.saveModules(modules);
+            }, [modules, loading]);
+
+            useEffect(() => {
+                if (!loading) StorageService.saveWords(words);
+            }, [words, loading]);
+
+            const handleImportClick = () => fileInputRef.current?.click();
+            const handleFileChange = async (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    try {
+                        const rawData = await ExcelService.readRawExcel(e.target.files[0]);
+                        setImportConfig({ isOpen: true, rawData, fileName: e.target.files[0].name });
+                    } catch (err) { alert("读取文件失败，请检查格式或网络连接"); }
+                    finally { if (fileInputRef.current) fileInputRef.current.value = ''; }
+                } else {
+                     if (fileInputRef.current) fileInputRef.current.value = '';
+                }
+            };
+            const handleImportConfirm = (wordCol, defCol, hasHeader) => {
+                if (!importConfig) return;
+                try {
+                    const parsedData = ExcelService.parseImportData(importConfig.rawData, wordCol, defCol, hasHeader);
+                    if (parsedData.length === 0) { alert("无有效数据"); return; }
+                    const modName = importConfig.fileName.replace(/\.[^/.]+$/, "");
+                    const newModule = StorageService.addModule(modName);
+                    setModules(prev => [...prev, newModule]);
+                    StorageService.importWords(newModule.id, parsedData);
+                    setWords(StorageService.getWords());
+                    setImportConfig(null);
+                    alert(`成功导入 ${parsedData.length} 个单词`);
+                } catch (e) { alert("导入出错"); }
+            };
+
+            const handleModuleDelete = () => { if (!deleteModuleId) return; StorageService.deleteModule(deleteModuleId); setModules(prev => prev.filter(m => m.id !== deleteModuleId)); setWords(prev => prev.filter(w => w.moduleId !== deleteModuleId)); setDeleteModuleId(null); };
+            const handleModuleRename = (id, newName) => { StorageService.updateModule(id, newName); setModules(prev => prev.map(m => m.id === id ? { ...m, name: newName } : m)); };
+
+            const handleWordAction = (action, payload) => {
+                if (action === 'view') { setNav({ ...nav, currentView: ViewName.WORD_DETAIL, selectedWordId: payload.id }); }
+                else if (action === 'delete') {
+                    const ids = payload; let newWords = [...words];
+                    ids.forEach(id => {
+                        const w = newWords.find(x => x.id === id); if (!w) return;
+                        if (nav.selectedModuleId === SPECIAL_MODULE_IDS.FAVORITES) { w.isFavorite = false; }
+                        else if (nav.selectedModuleId === SPECIAL_MODULE_IDS.TRASH) { newWords = newWords.filter(x => x.id !== id); }
+                        else {
+                            if (nav.selectedSubGroup === WordStatus.TooSimple) { if (!newWords.some(x => x.text === w.text && x.moduleId === SPECIAL_MODULE_IDS.TRASH)) newWords.push({ ...w, id: w.id + '_trash', moduleId: SPECIAL_MODULE_IDS.TRASH }); }
+                            else { w.status = WordStatus.TooSimple; }
+                        }
+                    }); setWords(newWords);
+                }
+                else if (action === 'favorite') { 
+                    const ids = payload;
+                    setWords(prevWords => {
+                        const idsSet = new Set(ids);
+                        const takenTexts = new Set();
+                        prevWords.forEach(w => {
+                            if (w.isFavorite && !idsSet.has(w.id)) {
+                                takenTexts.add(w.text.trim().toLowerCase());
+                            }
+                        });
+
+                        return prevWords.map(w => {
+                            if (idsSet.has(w.id)) {
+                                if (w.isFavorite) {
+                                    return { ...w, isFavorite: false };
+                                } else {
+                                    const text = w.text.trim().toLowerCase();
+                                    if (!takenTexts.has(text)) {
+                                        takenTexts.add(text);
+                                        return { ...w, isFavorite: true };
+                                    }
+                                    return w;
+                                }
+                            }
+                            return w;
+                        });
+                    });
+                }
+                else if (action === 'move') { setMoveModal({ isOpen: true, wordIds: payload }); }
+                else if (action === 'export') {
+                    let w = words;
+                    if (nav.selectedModuleId) {
+                        w = words.filter(x => x.moduleId === nav.selectedModuleId);
+                        if (nav.selectedSubGroup && nav.selectedSubGroup !== 'all') w = w.filter(x => x.status === nav.selectedSubGroup);
+                        if (nav.selectedModuleId === SPECIAL_MODULE_IDS.FAVORITES) w = words.filter(x => x.isFavorite);
+                    }
+                    ExcelService.exportToExcel(w, 'MindLex_Export');
+                }
+            };
+
+            const handleUpdateWord = (id, def) => setWords(words.map(w => w.id === id ? { ...w, definition: def } : w));
+            const handleBulkMoveConfirm = (targetModuleId, status) => { setWords(prev => prev.map(w => moveModal.wordIds.includes(w.id) ? { ...w, moduleId: targetModuleId, status } : w)); setMoveModal({ isOpen: false, wordIds: [] }); if (nav.currentView === ViewName.WORD_DETAIL) setNav({ ...nav, currentView: ViewName.WORD_LIST }); };
+            const handleScreeningResult = (id, correct) => { if (correct) setWords(prev => prev.map(w => w.id === id ? { ...w, status: WordStatus.Mastered } : w)); };
+
+            const targetModule = modules.find(m => m.id === nav.selectedModuleId);
+
+            if (loading) return null;
+
+            return (
+                <>
+                    <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleFileChange} />
+                    {importConfig && <ImportConfigModal rawData={importConfig.rawData} fileName={importConfig.fileName} onCancel={() => { setImportConfig(null); if(fileInputRef.current) fileInputRef.current.value = ''; }} onConfirm={handleImportConfirm} />}
+                    {moveModal.isOpen && <MoveModal modules={modules} onClose={() => setMoveModal({ isOpen: false, wordIds: [] })} onConfirm={handleBulkMoveConfirm} />}
+                    {deleteModuleId && <ConfirmModal title="删除模块" message={`确定要删除“${modules.find(m => m.id === deleteModuleId)?.name}”吗？`} onConfirm={handleModuleDelete} onCancel={() => setDeleteModuleId(null)} />}
+                    {nav.currentView === ViewName.HOME && <HomeView modules={modules} onImportClick={handleImportClick} onSelectModule={(m) => setNav({ ...nav, currentView: m.isSpecial ? ViewName.WORD_LIST : ViewName.MODULE_DETAIL, selectedModuleId: m.id, selectedSubGroup: 'all' })} onRequestDelete={(m) => setDeleteModuleId(m.id)} />}
+                    
+                    {nav.currentView === ViewName.MODULE_DETAIL && targetModule && <ModuleDetailView module={targetModule} counts={{ [WordStatus.Unmastered]: words.filter(w => w.moduleId === nav.selectedModuleId && w.status === WordStatus.Unmastered).length, [WordStatus.Mastered]: words.filter(w => w.moduleId === nav.selectedModuleId && w.status === WordStatus.Mastered).length, [WordStatus.TooSimple]: words.filter(w => w.moduleId === nav.selectedModuleId && w.status === WordStatus.TooSimple).length }} onBack={() => setNav({ ...nav, currentView: ViewName.HOME })} onRename={(name) => handleModuleRename(nav.selectedModuleId, name)} onSelectSubGroup={(status) => setNav({ ...nav, currentView: ViewName.WORD_LIST, selectedSubGroup: status })} onRecite={() => setNav({ ...nav, currentView: ViewName.RECITE })} onScreen={() => setNav({ ...nav, currentView: ViewName.SCREENING })} onReset={() => setWords(prev => prev.map(w => (w.moduleId === nav.selectedModuleId && w.status === WordStatus.Mastered) ? { ...w, status: WordStatus.Unmastered } : w))} />}
+                    
+                    {nav.currentView === ViewName.WORD_LIST && <WordListView words={nav.selectedModuleId === SPECIAL_MODULE_IDS.FAVORITES ? words.filter(w => w.isFavorite) : nav.selectedModuleId === SPECIAL_MODULE_IDS.TRASH ? words.filter(w => w.moduleId === SPECIAL_MODULE_IDS.TRASH) : words.filter(w => w.moduleId === nav.selectedModuleId && w.status === nav.selectedSubGroup)} title={nav.selectedModuleId === SPECIAL_MODULE_IDS.FAVORITES ? "收藏" : nav.selectedModuleId === SPECIAL_MODULE_IDS.TRASH ? "垃圾桶" : `${modules.find(m => m.id === nav.selectedModuleId)?.name || ''} - ${nav.selectedSubGroup === WordStatus.Unmastered ? '未掌握' : nav.selectedSubGroup === WordStatus.Mastered ? '已掌握' : '太简单'}`} isSpecial={nav.selectedModuleId === SPECIAL_MODULE_IDS.FAVORITES || nav.selectedModuleId === SPECIAL_MODULE_IDS.TRASH} moduleId={nav.selectedModuleId} subGroup={nav.selectedSubGroup !== 'all' ? nav.selectedSubGroup : undefined} onBack={() => { if (nav.selectedModuleId === SPECIAL_MODULE_IDS.FAVORITES || nav.selectedModuleId === SPECIAL_MODULE_IDS.TRASH) setNav({ ...nav, currentView: ViewName.HOME }); else setNav({ ...nav, currentView: ViewName.MODULE_DETAIL }); }} onWordAction={handleWordAction} />}
+                    {nav.currentView === ViewName.WORD_DETAIL && nav.selectedWordId && <WordDetailView word={words.find(w => w.id === nav.selectedWordId)} onBack={() => setNav({ ...nav, currentView: ViewName.WORD_LIST })} onUpdateWord={handleUpdateWord} onMoveRequest={(ids) => setMoveModal({ isOpen: true, wordIds: ids })} onDeleteWord={(id) => { handleWordAction('delete', [id]); setNav({ ...nav, currentView: ViewName.WORD_LIST }); }} onToggleFavorite={(id) => handleWordAction('favorite', [id])} />}
+                    {nav.currentView === ViewName.RECITE && nav.selectedModuleId && <ReciteView moduleId={nav.selectedModuleId} allWords={words} moduleWords={words.filter(w => w.moduleId === nav.selectedModuleId && w.status === WordStatus.Unmastered)} onExit={() => setNav({ ...nav, currentView: ViewName.MODULE_DETAIL })} onUpdateWordStatus={(id, status) => setWords(prev => prev.map(w => w.id === id ? { ...w, status } : w))} onToggleFavorite={(id) => handleWordAction('favorite', [id])} onUpdateWord={handleUpdateWord} onMoveRequest={(ids) => setMoveModal({ isOpen: true, wordIds: ids })} onDeleteWord={(id) => handleWordAction('delete', [id])} />}
+                    {nav.currentView === ViewName.SCREENING && nav.selectedModuleId && <ScreeningView moduleId={nav.selectedModuleId} allWords={words} moduleWords={words.filter(w => w.moduleId === nav.selectedModuleId && w.status === WordStatus.Unmastered)} onExit={() => setNav({ ...nav, currentView: ViewName.MODULE_DETAIL })} onWordResult={handleScreeningResult} onUpdateWordStatus={(id, status) => setWords(prev => prev.map(w => w.id === id ? { ...w, status } : w))} onToggleFavorite={(id) => handleWordAction('favorite', [id])} onUpdateWord={handleUpdateWord} onMoveRequest={(ids) => setMoveModal({ isOpen: true, wordIds: ids })} onDeleteWord={(id) => handleWordAction('delete', [id])} />}
+                </>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
